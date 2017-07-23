@@ -85,10 +85,11 @@ class PageStack(Gtk.EventBox):
         menu.append(itemAddPeer)
 
 
-        itemRename = Gtk.MenuItem("Rename this task...")
+        itemRename = Gtk.MenuItem("Edit Description")
         itemRename.connect("activate", self.pageEditMenuClicked)
-        itemAddAction = Gtk.MenuItem("Add a child task...")
-        itemAddAction.connect("activate", self.addChild_menuclicked, self.ctrl_parent, self.db_task)
+        itemAddAction = Gtk.MenuItem("Split...  >")
+
+        itemAddAction.connect("activate", self.addChild_menuclicked)
         itemCompleteAction = Gtk.MenuItem("Mark as Complete")
         itemCompleteAction.connect("activate", self.itemCompletionClicked)
 
@@ -113,9 +114,9 @@ class PageStack(Gtk.EventBox):
 
     def addPeer_menuclicked(self, widget):
         # This is handled by the ctrl_parent TaskFactory since a peer is being created.
-        newDB_Task = self.ctrl_parent.dbhandle.generate_new_task(parent_taskID=self.ctrl_parent.db_task.taskID)
-        newUI_Task = UI_Task(newDB_Task, self.ctrl_parent)
-        self.ctrl_parent.add_UI_Task(newUI_Task)
+        newDB_Task = self.ctrl_parent.dbhandle.generate_new_task(parent_taskID=self.getParentTaskLoaderID())
+        newUI_Task = UI_Task(newDB_Task, parentTaskFactory=self.parentNotebook)
+        self.parentNotebook.add_UI_Task(newUI_Task)
 
     def addChild_menuclicked(self, widget):
         task = self.ctrl_parent.dbhandle.generate_new_task(self.ctrl_parent.db_task.taskID)
@@ -126,11 +127,6 @@ class PageStack(Gtk.EventBox):
     def ContextMenu(self, widget, event):
         if event.type == Gdk.EventType.BUTTON_PRESS and event.get_button().button == 3:
             widget.popup(None, None, None, None, event.get_button().button, event.time)
-
-    def editMenuClicked(self, widget, parentNotebook):
-        # parentNotebook.toggleCurrentTabStackArea()
-        #win = EditWindow()
-        self.stack.set_visible_child(self.editArea)
 
     def returnPressed(self, widget, event, stack, entry, label, db_task):
         #print(Gdk.keyval_name(event.keyval))
@@ -143,6 +139,8 @@ class PageStack(Gtk.EventBox):
             dbhandle.updateTaskDescription(db_task, buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), True))
 
     def pageEditMenuClicked(self, widget):
+        needlessBuffer = self.editField.get_buffer()
+        needlessBuffer.set_text( self.viewLabel.get_text() )
         self.stack.set_visible_child(self.editArea)
 
 
@@ -236,7 +234,7 @@ class TabStack(Gtk.EventBox):
         itemRename = Gtk.MenuItem("Change Title")
         itemRename.connect("activate", self.tabEditMenuClicked)
 
-        itemAddAction = Gtk.MenuItem("Split")
+        itemAddAction = Gtk.MenuItem("Split >")
         itemAddAction.connect("activate", self.addChild_menuclicked)
 
         itemCompleteAction = Gtk.MenuItem("Mark Complete")
@@ -414,11 +412,15 @@ class TaskLoader(Gtk.Notebook):
         pageContainer = Gtk.Box(spacing=6, orientation=Gtk.Orientation.VERTICAL)
         pageContainer.set_border_width(10)
 
+
+
         # Add the project description label to the notebook tab
         pageContainer.pack_start(ui_task.pageDisplay, False, True, 6)
 
         # Add the new task to the page of the current TaskFactory instance
         self.append_page(pageContainer, ui_task)
+        self.set_tab_reorderable(pageContainer, True)
+
 
         if ui_task.has_children:
             ui_task.add_child_TaskBook(pageContainer)
