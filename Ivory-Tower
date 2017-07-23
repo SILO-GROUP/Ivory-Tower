@@ -1,0 +1,765 @@
+#!/usr/bin/python3
+
+# Systems Dependencies
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, Gdk
+import sqlite3 as lite
+
+
+# This is a UI component that is used by UI_Task
+# Should only be a stack switch for either a tab or a page view
+# Important to remember that this handles both states (editable vs. non-editable) for both page and tab.
+class PageStack(Gtk.EventBox):
+    def __init__(self, parent, parentNotebook):
+        Gtk.EventBox.__init__(self)
+
+        self.ctrl_parent = parent
+        self.parentNotebook =  parentNotebook
+
+        self.db_task = self.ctrl_parent.db_task
+
+        # Create the stack
+        self.stack = Gtk.Stack()
+
+        # Create the view label with the textvalue supplied during instantiation
+        self.viewLabel = Gtk.Label(parent.db_task.description)
+        # Give it line wrap just because it's pretty
+        self.viewLabel.set_line_wrap(True)
+        self.viewLabel.set_halign(True)
+        self.viewLabel.set_padding(6, 6)
+
+        self.viewLabel.show()
+
+        # Create the view area to switch to
+        self.viewArea = Gtk.HBox(spacing=6, orientation=Gtk.Orientation.VERTICAL)
+        # Create the edit area to switch to
+        self.editArea = Gtk.Box(spacing=6, orientation=Gtk.Orientation.VERTICAL)
+
+        # Create an edit widget for a page
+        self.editField = Gtk.TextView()
+        self.editField.set_wrap_mode(2)
+        self.editField.connect("key-press-event", self.returnPressed, self.stack, self.editField, self.viewLabel, self.db_task)
+        self.editField.set_left_margin(6)
+
+        # Add the edit field to the edit area
+        self.editArea.pack_start(self.editField, False, True, 0)
+        self.editArea.show_all()
+
+        # Add the edit area to this stack type
+        self.stack.add_titled(self.editArea, 'editArea', "Edit Area")
+
+        # Add view label to the view area
+        self.viewArea.pack_start(self.viewLabel, False, True, 0)
+
+        # Add the view area to this stack type
+        self.stack.add_titled(self.viewArea, 'viewArea', "View Area")
+        self.stack.show_all()
+
+        # View Area is the default view
+        self.stack.set_visible_child(self.viewArea)
+
+        self.add(self.stack)
+        #self.set_above_child(False)
+        #self.set_visible_window(True)
+        self.show()
+        self.show_all()
+
+        # generate the contextual menu for this page
+        pageMenu = self.gen_context_menu()
+        self.connect_object("event", self.ContextMenu, pageMenu)
+
+    def getParentTaskLoaderID(self):
+        return self.parentNotebook.taskID
+
+    #  page_context_menu():
+    #    Generates a contextual menu for a page.
+    #
+    #  return:              the Gtk.Menu contextual menu
+    def gen_context_menu(self):
+        menu = Gtk.Menu()
+
+        itemAddPeer = Gtk.MenuItem("Add a new item to this task.")
+        itemAddPeer.connect("activate", self.addPeer_menuclicked)
+
+        menu.append(itemAddPeer)
+
+
+        itemRename = Gtk.MenuItem("Rename this task...")
+        itemRename.connect("activate", self.pageEditMenuClicked)
+        itemAddAction = Gtk.MenuItem("Add a child task...")
+        itemAddAction.connect("activate", self.addChild_menuclicked, self.ctrl_parent, self.db_task)
+        itemCompleteAction = Gtk.MenuItem("Mark as Complete")
+        itemCompleteAction.connect("activate", self.itemCompletionClicked)
+
+        menu.append(itemRename)
+        menu.append(itemAddAction)
+        menu.append(itemCompleteAction)
+
+        menu.show_all()
+        return menu
+
+#    def enterPressedOnEntryWidget(self, widget, stack, label, entry, area, task):
+#        self.viewLabel.set_text(entry.get_text())
+#        self.stack.set_visible_child(area)
+#        dbhandle = self.get_parent().get_parent().dbhandle
+#        dbhandle.updateTaskDescription(task, entry.get_text())
+
+
+    def itemCompletionClicked(self, widget):
+        self.parentNotebook.dbhandle.updateTaskStatus(self.db_task, True )
+        self.parentNotebook.remove_page(self.parentNotebook.page_num(self.parentNotebook.get_current_page_container()))
+
+
+    def addPeer_menuclicked(self, widget):
+        # This is handled by the ctrl_parent TaskFactory since a peer is being created.
+        newDB_Task = self.ctrl_parent.dbhandle.generate_new_task(parent_taskID=self.ctrl_parent.db_task.taskID)
+        newUI_Task = UI_Task(newDB_Task, self.ctrl_parent)
+        self.ctrl_parent.add_UI_Task(newUI_Task)
+
+    def addChild_menuclicked(self, widget):
+        task = self.ctrl_parent.dbhandle.generate_new_task(self.ctrl_parent.db_task.taskID)
+        if not hasattr(self.ctrl_parent,  'childTaskBook'):
+            self.parentNotebook.add_child_TaskBook(self, self.parentNotebook.get_current_page_container())
+        self.ctrl_parent.add_childTask(task)
+
+    def ContextMenu(self, widget, event):
+        if event.type == Gdk.EventType.BUTTON_PRESS and event.get_button().button == 3:
+            widget.popup(None, None, None, None, event.get_button().button, event.time)
+
+    def editMenuClicked(self, widget, parentNotebook):
+        # parentNotebook.toggleCurrentTabStackArea()
+        #win = EditWindow()
+        self.stack.set_visible_child(self.editArea)
+
+    def returnPressed(self, widget, event, stack, entry, label, db_task):
+        #print(Gdk.keyval_name(event.keyval))
+        if Gdk.keyval_name(event.keyval) == 'KP_Enter':
+            buffer = entry.get_buffer()
+            label.set_text(buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), True))
+
+            self.stack.set_visible_child(self.viewArea)
+            dbhandle = self.ctrl_parent.dbhandle
+            dbhandle.updateTaskDescription(db_task, buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), True))
+
+    def pageEditMenuClicked(self, widget):
+        self.stack.set_visible_child(self.editArea)
+
+
+# This is a UI component that is used by UI_Task
+# Should only be a stack switch for either a tab or a page view
+# Important to remember that this handles both states (editable vs. non-editable) for both page and tab.
+class TabStack(Gtk.EventBox):
+    def __init__(self, parent, parentNoteBook):
+        Gtk.EventBox.__init__(self)
+
+        # bind the ctrl_parent
+        self.ctrl_parent = parent
+        self.parentNotebook = parentNoteBook
+
+        # bind the ctrl_parent's task
+        self.db_task = self.ctrl_parent.db_task
+
+        # Create the stack
+        self.stack = Gtk.Stack()
+
+        # Create the view label with the textvalue supplied during instantiation
+        self.viewLabel = Gtk.Label(self.db_task.title)
+
+        # Give it line wrap just because it's pretty
+        self.viewLabel.set_line_wrap(True)
+        self.viewLabel.set_halign(True)
+        self.viewLabel.set_padding(6, 6)
+
+        # Make it visible
+        self.viewLabel.show()
+
+        # Create the Switch areas.
+        # Create the view area to switch to
+        self.viewArea = Gtk.HBox()
+        # Create the edit area to switch to
+        self.editArea = Gtk.Box()
+
+        # it's a tab so use GTK.Entry()
+        self.editField = Gtk.Entry()
+
+        # connect the edit field to the enterPressedOnEntryWidget event handler, tell it the label and edit field, and pass the viewArea
+        # This call should be where db io and ui changes are hooked together
+        self.editField.connect("activate", self.enterPressedOnEntryWidget)
+        # connect the contextual menus to our new stack switches
+        # generate the contextual menu for this tab
+        tabMenu = self.gen_context_menu()
+        self.connect_object("event", self.ContextMenu, tabMenu)
+
+
+        # Add the edit field to the edit area
+        self.editArea.pack_start(self.editField, True, True, 0)
+        self.editArea.show_all()
+
+        # Add the edit area to this stack type
+        self.stack.add_titled(self.editArea, 'editArea', "Edit Area")
+
+        # Add view label to the view area
+        self.viewArea.pack_start(self.viewLabel, False, False, 0)
+
+        # Add the view area to this stack type
+        self.stack.add_titled(self.viewArea, 'viewArea', "View Area")
+        self.stack.show_all()
+
+        # View Area is the default view
+        self.stack.set_visible_child(self.viewArea)
+
+        self.add(self.stack)
+        #self.set_above_child(False)
+        #self.set_visible_window(True)
+        self.show()
+        self.show_all()
+
+    def getParentTaskLoaderID(self):
+        return self.parentNotebook.taskID
+
+    #  tab_context_menu():
+    #    Generates a contextual menu for a tab.
+    #
+    #  db_task:             the DB_Task object to take
+    #  parentTaskFactory:   the ctrl_parent notebook
+    #  return:              the Gtk.Menu contextual menu
+    def gen_context_menu(self):
+        menu = Gtk.Menu()
+
+        createTask_MenuItem = Gtk.MenuItem("Create New")
+
+        createTask_MenuItem.connect("activate", self.addPeer_menuclicked)
+
+        menu.append(createTask_MenuItem)
+
+        itemRename = Gtk.MenuItem("Change Title")
+        itemRename.connect("activate", self.tabEditMenuClicked)
+
+        itemAddAction = Gtk.MenuItem("Split")
+        itemAddAction.connect("activate", self.addChild_menuclicked)
+
+        itemCompleteAction = Gtk.MenuItem("Mark Complete")
+        itemCompleteAction.connect("activate", self.itemCompletionClicked)
+
+        menu.append(itemRename)
+        menu.append(itemAddAction)
+        menu.append(itemCompleteAction)
+
+        menu.show_all()
+        return menu
+
+    def itemCompletionClicked(self, widget):
+        self.parentNotebook.dbhandle.updateTaskStatus(self.db_task, True)
+        self.parentNotebook.remove_page(self.parentNotebook.page_num(self.parentNotebook.get_current_page_container() ))
+
+    def addChild_menuclicked(self, widget):
+        task = self.ctrl_parent.dbhandle.generate_new_task(self.ctrl_parent.db_task.taskID)
+        if not hasattr(self.ctrl_parent,  'childTaskBook'):
+            self.ctrl_parent.add_child_TaskBook(self.parentNotebook.get_current_page_container())
+        self.ctrl_parent.add_childTask(task)
+
+    def addPeer_menuclicked(self, widget):
+        # This is handled by the ctrl_parent TaskFactory since a peer is being created.
+        newDB_Task = self.ctrl_parent.dbhandle.generate_new_task(parent_taskID=self.getParentTaskLoaderID())
+        newUI_Task = UI_Task(db_task=newDB_Task, parentTaskFactory=self.parentNotebook)
+        self.parentNotebook.add_UI_Task(newUI_Task)
+
+
+
+    def tabEditMenuClicked(self, widget):
+        self.editField.set_text(self.viewLabel.get_text())
+        self.stack.set_visible_child(self.editArea)
+
+    # menu event handlers
+
+
+
+
+    def enterPressedOnEntryWidget(self, widget):
+        # set the label to the value of what is in the Entry field
+        self.viewLabel.set_text( self.editField.get_text() )
+
+        # make the label visible again and the Entry field invisible
+        self.stack.set_visible_child(self.viewArea)
+
+        # get the dbhandle from ctrl_parent
+        dbhandle = self.ctrl_parent.dbhandle
+
+        # Update the database for the changed task
+        dbhandle.updateTaskTitle( self.db_task, self.viewLabel.get_text() )
+
+
+    def ContextMenu(self, widget, event):
+        if event.type == Gdk.EventType.BUTTON_PRESS and event.get_button().button == 3:
+            widget.popup(None, None, None, None, event.get_button().button, event.time)
+
+    def editMenuClicked(self, widget):
+        # parentNotebook.toggleCurrentTabStackArea()
+        #win = EditWindow()
+        self.stack.set_visible_child(self.editArea)
+
+
+
+
+# The transition object from DB_Task to UI_Task. A UI task takes in a DB_Task object and then creates a tab and
+# corresponding page in the notebook.  This object should be seen as an amalgamation of the page and the tab in the
+# notebook.
+
+# This entire class needs reworked next.
+class UI_Task(Gtk.Box):
+    def __init__(self, db_task, parentTaskFactory):
+        super(Gtk.Box, self).__init__()
+
+        # Aesthetics
+        self.set_border_width(6)
+
+        # bind the data structure object
+        self.db_task = db_task
+
+        # bind the ctrl_parent
+        self.ctrl_parent = parentTaskFactory
+
+        self.dbhandle = self.ctrl_parent.dbhandle
+
+        # determine if we have children
+        self.has_children = self.ctrl_parent.dbhandle.has_children(self.db_task)
+
+
+
+
+        # create the stack switch for the tab
+        self.tabDisplay = TabStack(self, self.ctrl_parent)
+        #self.tabDisplay.connect_object("event", self.tabDisplay.ContextMenu, self.tabDisplay.gen_context_menu() )
+
+        # and now one for the page
+        self.pageDisplay = PageStack(self, self.ctrl_parent)
+        # self.pageDisplay.connect_object("event", self.pageDisplay.ContextMenu, self.pageDisplay.gen_context_menu() )
+
+        # Add the tabStack to this instance
+#        self.pack_start(self.tabDisplay, True, True, 6)
+        self.add(self.tabDisplay)
+
+        # of the visible ones, show all the things
+        self.show_all()
+
+
+
+    #  add_child_TaskLoader()
+    #    Prepares a task for being able to hold children.
+    #
+    #  return:  None
+    def add_child_TaskBook(self, page_to_split):
+        self.childTaskBook = TaskLoader(parent=self, taskID=self.db_task.taskID)
+
+        # Set the tabs on the subnotebook to be on the left.
+        self.childTaskBook.set_tab_pos(Gtk.PositionType.LEFT)
+
+        # Make the tabs on the subnotebook scrollable and reorderable
+        self.childTaskBook.set_scrollable(True)
+
+
+        # decontext all of this
+        page_to_split.pack_start(self.childTaskBook, True, True, 6)
+        page_to_split.show()
+
+
+
+    #  add_childTask():
+    #
+    #  db_task:             the DB_Task object to take
+    #  parentTaskFactory:   the ctrl_parent notebook
+    #  return:              the Gtk.Menu contextual menu
+    def add_childTask(self, db_task):
+        print("CHILD TASK ID")
+        print(db_task.taskID)
+        #if not hasattr(self, 'childTaskBook'):
+        #    self.add_child_TaskBook(self, page_to_split)
+
+        newTask = UI_Task(db_task=db_task, parentTaskFactory=self.childTaskBook)
+        self.childTaskBook.add_UI_Task(newTask)
+        self.has_children = True
+
+
+# The notebook object.  Populates tasks for a given ID.
+# Ultimately a notebook represents a task much like a tab or page.
+class TaskLoader(Gtk.Notebook):
+    def __init__(self, parent, taskID):
+        Gtk.Notebook.__init__(self)
+
+        # attach the taskID
+        self.taskID = taskID
+
+        # attach the supplied dbhandle from the ctrl_parent to this for convenient referencing
+        self.dbhandle = parent.dbhandle
+
+        # Set the tabs on the notebook to be on the left.
+        self.set_tab_pos(Gtk.PositionType.LEFT)
+
+        # Make the tabs on the notebook scrollable
+        self.set_scrollable(True)
+
+        #self.connect("page-added", self.event_proto)
+
+        self.show_all()
+
+    # disabled
+    def event_proto(self, widget, event, data=None):
+        print("triggered")
+        if self.taskID !=0:
+            self.add_all_children()
+
+    def add_UI_Task(self, ui_task):
+        # Create a box container for the tab
+        pageContainer = Gtk.Box(spacing=6, orientation=Gtk.Orientation.VERTICAL)
+        pageContainer.set_border_width(10)
+
+        # Add the project description label to the notebook tab
+        pageContainer.pack_start(ui_task.pageDisplay, False, True, 6)
+
+        # Add the new task to the page of the current TaskFactory instance
+        self.append_page(pageContainer, ui_task)
+
+        if ui_task.has_children:
+            ui_task.add_child_TaskBook(pageContainer)
+            ui_task.childTaskBook.add_all_children(ui_task.db_task.taskID)
+
+
+        # show
+        self.show_all()
+
+    # adds the children of the task to the calling TaskLoader
+    def add_all_children(self, taskID):
+        # fetch tasks for this task's taskID
+        tasks = self.dbhandle.getTaskChildren(taskID, 0)
+
+        for db_task in tasks:
+            # create a UI_Task object from the DB_Task object who thinks its ctrl_parent is this notebook
+            ui_task = UI_Task(db_task, self)
+
+
+            # add each task belonging to this notebook
+            self.add_UI_Task(ui_task)
+
+
+
+    def get_current_page_container(self):
+        print("CURRENT PAGE")
+        print(self.get_current_page())
+        return self.get_nth_page(self.get_current_page())
+
+
+# Some static strings for reuse in various places.
+class DefaultStrings():
+    projectTitle = "New Task Item"
+    projectDescription = "This is an empty task item."
+
+    allTasksTitle = "All Tasks"
+    allTasksDescription = "This is the all tasks view.  Should display all items whose ctrl_parent = 0 in the sqlite database."
+
+    archiveTasksTitle = "Archived Tasks"
+    archiveTasksDescription = "These are tasks that have been completed.  Items are removed from their place and moved here to reduce clutter and track work already done."
+
+    ApplicationTitle = "Ivory Tower"
+    ApplicationOwner = "SILO GROUP, LTD."
+
+# The headerbar for TaskFactoryWindow
+class MainHeaderBar(Gtk.HeaderBar):
+    def __init__(self, Window):
+        Gtk.HeaderBar.__init__(self)
+
+        self.set_show_close_button(True)
+        self.props.title = DefaultStrings.ApplicationTitle
+        self.props.subtitle = DefaultStrings.ApplicationOwner
+
+        self.set_decoration_layout("menu:minimize,close")
+        self.set_border_width(3)
+
+        Window.set_titlebar(self)
+
+
+# This is the MainWindow class.  This is the main window for the application.
+class TaskLoaderWindow(Gtk.Window):
+    def __init__(self, dbhandle):
+        Gtk.Window.__init__(self, title=DefaultStrings.ApplicationOwner)
+        # Do the autoattachy things with a new headerbar
+        self.headerBar = MainHeaderBar(self)
+
+        # create a fixed point of reference for anything in this window to the database IO obj handle
+        self.dbhandle = dbhandle
+
+        # placeholder taskID for root Window
+        self.taskID = 0
+
+        # Attach the notebook to the window.
+        self.rootTaskFactory = TaskLoader(parent=self, taskID=0)
+        self.add_root_items()
+
+        # Add the root projects notebook to the ctrl_parent window
+        self.add(self.rootTaskFactory)
+
+        # bind to the delete-event to Gtk.main_quit
+        self.connect("delete-event", Gtk.main_quit)
+
+        # show all items
+        self.show_all()
+
+
+    def add_root_items(self):
+        pass
+
+    def start_TaskLoader(self):
+        if not self.dbhandle.has_children(0):
+            newDB_Task = self.dbhandle.generate_new_task(parent_taskID=0)
+            newUI_Task = UI_Task(db_task=newDB_Task, parentTaskFactory=self)
+            self.rootTaskFactory.add_UI_Task(newUI_Task)
+        # add the children for this root notebook
+        self.rootTaskFactory.add_all_children(0)
+
+# Class for all direct DB interaction
+class DBIO():
+    def __init__(self, fileLocation):
+        self.db_connection = None
+
+        self.db_connection = lite.connect(fileLocation)
+
+        self.cursor = self.db_connection.cursor()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    # Helper for __exit__
+    def close(self):
+        if self.db_connection:
+            self.db_connection.close()
+
+    def generate_new_task(self, parent_taskID):
+        taskINPUT = (0, 0, "Default Task", "Default Description")
+
+        task = DB_Task(taskINPUT)
+        taskID = self.createTask(task, 0)
+        self.removeAllAssociations(taskID)
+        task.taskID = taskID
+        self.setTaskParent(taskID, parent_taskID)
+        return task
+
+    #  runQuery():
+    #    Runtime safe wrapper for the cursor's execution method.
+    #
+    #  query:  the SQL query
+    #  params: any interpolated values in the query, supplied as a tuple
+    #  return: raw rows as an array of tuples, multidimensional[n][n] (needs deserialized)
+    def runQuery(self, query, params=None):
+        try:
+            if params:
+                self.cursor.execute(query, params)
+            else:
+                self.cursor.execute(query)
+            self.data = self.cursor.fetchall()
+            self.db_connection.commit()
+
+        except lite.Error as e:
+            print('Error: {}'.format(e.args))
+
+        try:
+            return self.data
+        except:
+            return None
+
+    # has_children():
+    #    Boolean representing whether or not the supplied task or taskID has child associations
+    #
+    #  db_task_or_id:  status filter for all returned rows
+    #  return:  bool   whether it has children associated with it
+    def has_children(self, db_task_or_id):
+
+        if isinstance(db_task_or_id, DB_Task):
+            this_id = int(db_task_or_id.taskID)
+        if isinstance(db_task_or_id, int):
+            this_id = int(db_task_or_id)
+        if isinstance(db_task_or_id, str):
+            this_id = int(db_task_or_id)
+
+        num_rows = self.runQuery("SELECT count(*) from nodal_associations WHERE parent_id=?", (this_id,))
+        return (num_rows.pop()[0] > 0)
+
+    #  getAllTasksbyStatus():
+    #    Gets all rows of tasks corresp. to the supplied status
+    #
+    #  status:  status filter for all returned rows
+    #  return:  DB_Tasks object
+    def getAllTasksbyStatus(self, status):
+        rawTasks = self.runQuery("SELECT * from tasks WHERE status == ?", (status,))
+        return DB_Tasks(rawTasks)
+
+    #  getTaskChildren():
+    #    Supplies row entries for tasks of a given parentID and status.
+    #
+    #  parentID:  the ID of the task whose children you want to fetch
+    #  status:    the status filter for children that are fetched
+    #  return:    DB_Tasks object
+    def getTaskChildren(self, parentID, status):
+        rawTasks = self.runQuery(
+            'select tasks.* from tasks INNER JOIN nodal_associations on tasks.id=nodal_associations.item_id where nodal_associations.parent_id=? and tasks.status=?',
+            (int(parentID), int(status),))
+        return DB_Tasks(rawTasks)
+
+    #  setTaskParent():
+    #    Creates an association between a child node and a ctrl_parent node.
+    #
+    #  parentID:  the ID of the ctrl_parent
+    #  childID:   the ID of the child
+    #  return:    None
+    def setTaskParent(self, childID, parentID):
+        self.runQuery(
+            "INSERT INTO nodal_associations (item_id, parent_id) VALUES (?, ?)",
+            (
+                int(childID),
+                int(parentID)
+            )
+        )
+
+    #  unsetTaskParent():
+    #    removes an association between a ctrl_parent and child
+    #
+    #  parentID:  the ID of the ctrl_parent
+    #  childID:   the ID of the child
+    #  return:    None
+    def unsetTaskParent(self, childID, parentID):
+        self.runQuery(
+            "DELETE from nodal_associations WHERE item_id=? AND parent_id=?",
+            (
+                int(childID),
+                int(parentID)
+            )
+        )
+
+    #  removeAllAssociations():
+    #    Removes ALL associations of a supplied taskID.  Handle with care.
+    #
+    #  taskID:  the ID of the task
+    #  return:  None
+    def removeAllAssociations(self, taskID):
+        self.runQuery("DELETE from nodal_associations WHERE item_id=? OR parent_id=?", (taskID, taskID,))
+
+    #  createTask():
+    #    adds a new task to the database
+    #
+    #  task:       DB_Task object to pull the data from.  Must be deserialized or created in app.  This forces compat
+    #              between DB API, UI API and actual data being stored.
+    #  parentID:   The ID of the ctrl_parent to make an association with.
+    #  return:     the ID of the created task
+    def createTask(self, task, parentID):
+        # New tasks are not completed by default.  Ensure this.
+        task.status = 0
+
+        # Create the task
+        self.runQuery(
+            "INSERT INTO tasks (status, title, description) VALUES (?, ?, ?)",
+            (
+                task.status,
+                task.title,
+                task.description,
+            )
+        )
+        # Fetch the ID of the newly created task
+        newTaskID = str(self.cursor.lastrowid)
+
+        # Create an association to the new task's initial ctrl_parent.
+        self.setTaskParent(newTaskID, parentID)
+
+        # Return the ID of the newly created task as in some cases the UI needs to use it, otherwise we'd be using
+        # one transaction for both task creation and nodal association in this case.
+        return newTaskID
+
+    #  deleteTask():
+    #    removes a task from the database
+    #
+    #  task:       DB_Task object to remove.  Must be deserialized or created in app.  This forces compat
+    #              between DB API, UI API and actual data being stored.
+    #  return:     None
+    def deleteTask(self, task):
+        # Remove the task
+        self.runQuery("DELETE FROM tasks WHERE id=?", (task.taskID,))
+        self.removeAllAssociations(task.id)
+
+    #  updateTaskStatus():
+    #    updates the status of a task in the database
+    #
+    #  task:       DB_Task object to pull the data from.  Must be deserialized or created in app.  This forces compat
+    #              between DB API, UI API and actual data being stored.
+    #  new_status: 0|1 / Represents completion status.  Can be bool.
+    #  return:     None
+    def updateTaskStatus(self, task, new_status):
+        self.runQuery("UPDATE tasks SET status=? WHERE id=?", (int(new_status), task.taskID))
+
+    #  updateTaskTitle():
+    #    updates the title of a task in the database
+    #
+    #  task:       DB_Task object to pull the data from.  Must be deserialized or created in app.  This forces compat
+    #              between DB API, UI API and actual data being stored.
+    #  new_title:  The text of the new title.
+    #  return:     None
+    def updateTaskTitle(self, task, new_title):
+        self.runQuery("UPDATE tasks SET title=? WHERE id=?", (new_title, task.taskID))
+
+    #  updateTaskDescription():
+    #    updates the title of a task in the database
+    #
+    #  task:       DB_Task object to pull the data from.  Must be deserialized or created in app.  This forces compat
+    #              between DB API, UI API and actual data being stored.
+    #  new_title:  The text of the new title.
+    #  return:     None
+    def updateTaskDescription(self, task, new_description):
+        self.runQuery("UPDATE tasks SET description=? WHERE id=?", (new_description, task.taskID))
+
+# Deserializes a row to an object consumable from modification methods in DBIO and from UI
+class DB_Task():
+    def __init__(self, QueryResponse):
+        if len(QueryResponse) is 4:
+            self.taskID = QueryResponse[0]
+            self.status = QueryResponse[1]
+            self.title = QueryResponse[2]
+            self.description = QueryResponse[3]
+        else:
+            print(len(QueryResponse))
+            print(QueryResponse)
+            raise ValueError("The database is corrupted.")
+
+    # Look Mom, you can print a DB_Task
+    def __str__(self):
+        return "\n{\n\t'TaskID':\t'%s',\n\t'Status':\t'%s',\n\t'Title':\t'%s',\n\t'Description':\t'%s',\n}" % (
+            self.taskID,
+            self.status,
+            self.title,
+            self.description
+        )
+
+    def __enter__(self):
+        return self
+
+# Creates a list of deserialized DB_Tasks from a query response
+class DB_Tasks(list):
+    def __init__(self, QueryResponse):
+        super().__init__()
+        for rawEntry in QueryResponse:
+            self.append(DB_Task(rawEntry))
+
+
+# The main loop.
+def Main():
+    # Add a file selector dialog for this along with a prompt for the AES password.
+    dbhandle = DBIO('default.db')
+
+    # load the mainwindow with the dbhandle intended for that window and all its objects
+    win = TaskLoaderWindow(dbhandle)
+    win.start_TaskLoader()
+    Gtk.main()
+
+
+if __name__=="__main__":
+    Main()
+
