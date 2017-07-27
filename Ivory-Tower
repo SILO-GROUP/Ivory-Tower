@@ -6,7 +6,6 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk
 import sqlite3 as lite
 
-
 # This is a UI component that is used by UI_Task
 # Should only be a stack switch for either a tab or a page view
 # Important to remember that this handles both states (editable vs. non-editable) for both page and tab.
@@ -263,17 +262,11 @@ class TabStack(Gtk.EventBox):
         newUI_Task = UI_Task(db_task=newDB_Task, parentTaskFactory=self.parentNotebook)
         self.parentNotebook.add_UI_Task(newUI_Task)
 
-
-
     def tabEditMenuClicked(self, widget):
         self.editField.set_text(self.viewLabel.get_text())
         self.stack.set_visible_child(self.editArea)
 
-    # menu event handlers
-
-
-
-
+    # event handlers
     def enterPressedOnEntryWidget(self, widget):
         # set the label to the value of what is in the Entry field
         self.viewLabel.set_text( self.editField.get_text() )
@@ -287,7 +280,6 @@ class TabStack(Gtk.EventBox):
         # Update the database for the changed task
         dbhandle.updateTaskTitle( self.db_task, self.viewLabel.get_text() )
 
-
     def ContextMenu(self, widget, event):
         if event.type == Gdk.EventType.BUTTON_PRESS and event.get_button().button == 3:
             widget.popup(None, None, None, None, event.get_button().button, event.time)
@@ -296,9 +288,6 @@ class TabStack(Gtk.EventBox):
         # parentNotebook.toggleCurrentTabStackArea()
         #win = EditWindow()
         self.stack.set_visible_child(self.editArea)
-
-
-
 
 # The transition object from DB_Task to UI_Task. A UI task takes in a DB_Task object and then creates a tab and
 # corresponding page in the notebook.  This object should be seen as an amalgamation of the page and the tab in the
@@ -323,9 +312,6 @@ class UI_Task(Gtk.Box):
         # determine if we have children
         self.has_children = self.ctrl_parent.dbhandle.has_children(self.db_task)
 
-
-
-
         # create the stack switch for the tab
         self.tabDisplay = TabStack(self, self.ctrl_parent)
         #self.tabDisplay.connect_object("event", self.tabDisplay.ContextMenu, self.tabDisplay.gen_context_menu() )
@@ -341,8 +327,6 @@ class UI_Task(Gtk.Box):
         # of the visible ones, show all the things
         self.show_all()
 
-
-
     #  add_child_TaskLoader()
     #    Prepares a task for being able to hold children.
     #
@@ -356,12 +340,9 @@ class UI_Task(Gtk.Box):
         # Make the tabs on the subnotebook scrollable and reorderable
         self.childTaskBook.set_scrollable(True)
 
-
         # decontext all of this
         page_to_split.pack_start(self.childTaskBook, True, True, 6)
         page_to_split.show()
-
-
 
     #  add_childTask():
     #
@@ -412,15 +393,12 @@ class TaskLoader(Gtk.Notebook):
         pageContainer = Gtk.Box(spacing=6, orientation=Gtk.Orientation.VERTICAL)
         pageContainer.set_border_width(10)
 
-
-
         # Add the project description label to the notebook tab
         pageContainer.pack_start(ui_task.pageDisplay, False, True, 6)
 
         # Add the new task to the page of the current TaskFactory instance
         self.append_page(pageContainer, ui_task)
         self.set_tab_reorderable(pageContainer, True)
-
 
         if ui_task.has_children:
             ui_task.add_child_TaskBook(pageContainer)
@@ -438,7 +416,6 @@ class TaskLoader(Gtk.Notebook):
         for db_task in tasks:
             # create a UI_Task object from the DB_Task object who thinks its ctrl_parent is this notebook
             ui_task = UI_Task(db_task, self)
-
 
             # add each task belonging to this notebook
             self.add_UI_Task(ui_task)
@@ -465,6 +442,8 @@ class DefaultStrings():
     ApplicationTitle = "Ivory Tower"
     ApplicationOwner = "SILO GROUP, LTD."
 
+
+
 # The headerbar for TaskFactoryWindow
 class MainHeaderBar(Gtk.HeaderBar):
     def __init__(self, Window):
@@ -477,28 +456,66 @@ class MainHeaderBar(Gtk.HeaderBar):
         self.set_decoration_layout("menu:minimize,close")
         self.set_border_width(3)
 
-        Window.set_titlebar(self)
+        self.db_open_button = Gtk.Button("Open")
+        self.db_open_button.connect("clicked", self.open_button_clicked)
+
+#        self.db_export_button = Gtk.Button("Export")
+#        self.db_export_button.connect("clicked", self.export_button_clicked)
+
+
+        self.add(self.db_open_button)
+#        self.add(self.db_export_button)
+
+        self.window = Window
+
+        self.window.set_titlebar(self)
+
+    def open_button_clicked(self, widget):
+        dialog = Gtk.FileChooserDialog(
+            "Please choose a database to use:",
+            self.window,
+            Gtk.FileChooserAction.OPEN, (
+                Gtk.STOCK_CANCEL,
+                Gtk.ResponseType.CANCEL,
+                Gtk.STOCK_OPEN,
+                Gtk.ResponseType.OK
+            )
+        )
+
+        response = dialog.run()
+
+        if response == Gtk.ResponseType.OK:
+            self.window.clear_window_for_open()
+            self.window.dbhandle = DBIO(dialog.get_filename())
+            self.window.load_task_loader()
+            self.window.start_TaskLoader()
+
+        if response == Gtk.ResponseType.CANCEL:
+            #window.dbhandle = DBIO()
+            pass
+
+        dialog.destroy()
+
+    def export_button_clicked(self, widget):
+        print("clicked to open")
 
 
 # This is the MainWindow class.  This is the main window for the application.
 class TaskLoaderWindow(Gtk.Window):
-    def __init__(self, dbhandle):
+    def __init__(self):
         Gtk.Window.__init__(self, title=DefaultStrings.ApplicationOwner)
+        # Add a file selector dialog for this along with a prompt for the AES password.
+        # create a fixed point of reference for anything in this window to the database IO obj handle
+        # now set in headerbar
+        self.dbhandle = DBIO()
+
         # Do the autoattachy things with a new headerbar
         self.headerBar = MainHeaderBar(self)
-
-        # create a fixed point of reference for anything in this window to the database IO obj handle
-        self.dbhandle = dbhandle
 
         # placeholder taskID for root Window
         self.taskID = 0
 
-        # Attach the notebook to the window.
-        self.rootTaskFactory = TaskLoader(parent=self, taskID=0)
-        self.add_root_items()
-
-        # Add the root projects notebook to the ctrl_parent window
-        self.add(self.rootTaskFactory)
+        self.load_task_loader()
 
         # bind to the delete-event to Gtk.main_quit
         self.connect("delete-event", Gtk.main_quit)
@@ -506,24 +523,39 @@ class TaskLoaderWindow(Gtk.Window):
         # show all items
         self.show_all()
 
+    def clear_window_for_open(self):
+        self.rootTaskFactory.destroy()
 
-    def add_root_items(self):
-        pass
+    def load_task_loader(self):
+        # Attach the notebook to the window.
+        self.rootTaskFactory = TaskLoader(parent=self, taskID=0)
+
+        # Add the root projects notebook to the ctrl_parent window
+        self.add(self.rootTaskFactory)
+
 
     def start_TaskLoader(self):
+        # add the children for this root notebook
+        self.rootTaskFactory.add_all_children(0)
+
+        # if there are none, then create one.
         if not self.dbhandle.has_children(0):
             newDB_Task = self.dbhandle.generate_new_task(parent_taskID=0)
             newUI_Task = UI_Task(db_task=newDB_Task, parentTaskFactory=self)
             self.rootTaskFactory.add_UI_Task(newUI_Task)
-        # add the children for this root notebook
-        self.rootTaskFactory.add_all_children(0)
+
 
 # Class for all direct DB interaction
 class DBIO():
-    def __init__(self, fileLocation):
+    def __init__(self, fileLocation=None):
         self.db_connection = None
 
-        self.db_connection = lite.connect(fileLocation)
+        self.fileLocation = fileLocation
+
+        if self.fileLocation == None:
+            self.fileLocation = 'default.db'
+
+        self.db_connection = lite.connect(self.fileLocation)
 
         self.cursor = self.db_connection.cursor()
 
@@ -586,7 +618,10 @@ class DBIO():
             this_id = int(db_task_or_id)
 
         num_rows = self.runQuery("SELECT count(*) from nodal_associations WHERE parent_id=?", (this_id,))
-        return (num_rows.pop()[0] > 0)
+        val = (num_rows[0][0] > 0)
+
+        print(val)
+        return val
 
     #  getAllTasksbyStatus():
     #    Gets all rows of tasks corresp. to the supplied status
@@ -751,13 +786,11 @@ class DB_Tasks(list):
             self.append(DB_Task(rawEntry))
 
 
+
 # The main loop.
 def Main():
-    # Add a file selector dialog for this along with a prompt for the AES password.
-    dbhandle = DBIO('default.db')
-
     # load the mainwindow with the dbhandle intended for that window and all its objects
-    win = TaskLoaderWindow(dbhandle)
+    win = TaskLoaderWindow()
     win.start_TaskLoader()
     Gtk.main()
 
